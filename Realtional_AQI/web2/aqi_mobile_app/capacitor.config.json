@@ -1,0 +1,9 @@
+{
+  "appId": "com.aqi.app",
+  "appName": "Relational AQI",
+  "webDir": "www",
+  "server": {
+    "url": "https://realtional-aqi-app.onrender.com",
+    "cleartext": true
+  }
+}
