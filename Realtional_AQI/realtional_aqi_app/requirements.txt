@@ -1,0 +1,8 @@
+Flask
+pandas
+joblib
+requests
+google-generativeai
+xgboost
+scikit-learn
+gunicorn

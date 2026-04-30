@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live AQI Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #0f172a; color: white; font-family: 'Inter', sans-serif; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+        }
+        .aqi-card { transition: transform 0.2s; }
+        .aqi-card:hover { transform: translateY(-5px); }
+    </style>
+</head>
+<body class="p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <div class="text-center mb-10">
+            <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
+                Live Environmental Monitor
+            </h1>
+            <p class="text-gray-400 mt-2">Ravangla Station • Real-time Data</p>
+        </div>
+
+        <div class="glass-card p-6 mb-8 text-center" id="calibration-box">
+            <h2 class="text-xl font-semibold mb-2">Sensor Calibration in Progress</h2>
+            <div class="w-full bg-gray-700 rounded-full h-4 mb-2">
+                <div id="progress-bar" class="bg-blue-500 h-4 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <p id="progress-text" class="text-gray-300">Reading 0 / 22</p>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-6 mb-12" id="sensor-grid">
+            <div class="glass-card p-6 text-center">
+                <h3 class="text-gray-400 text-sm font-semibold tracking-wider">PM 1.0</h3>
+                <p class="text-4xl font-bold mt-2 text-blue-300" id="val-pm1">0</p>
+                <span class="text-xs text-gray-500">µg/m³</span>
+            </div>
+            <div class="glass-card p-6 text-center">
+                <h3 class="text-gray-400 text-sm font-semibold tracking-wider">PM 2.5</h3>
+                <p class="text-4xl font-bold mt-2 text-emerald-300" id="val-pm25">0</p>
+                <span class="text-xs text-gray-500">µg/m³</span>
+            </div>
+            <div class="glass-card p-6 text-center">
+                <h3 class="text-gray-400 text-sm font-semibold tracking-wider">PM 10</h3>
+                <p class="text-4xl font-bold mt-2 text-yellow-300" id="val-pm10">0</p>
+                <span class="text-xs text-gray-500">µg/m³</span>
+            </div>
+            <div class="glass-card p-6 text-center">
+                <h3 class="text-gray-400 text-sm font-semibold tracking-wider">CO2</h3>
+                <p class="text-4xl font-bold mt-2 text-purple-300" id="val-co2">0</p>
+                <span class="text-xs text-gray-500">ppm</span>
+            </div>
+            <div class="glass-card p-6 text-center">
+                <h3 class="text-gray-400 text-sm font-semibold tracking-wider">TVOC</h3>
+                <p class="text-4xl font-bold mt-2 text-orange-300" id="val-tvoc">0</p>
+                <span class="text-xs text-gray-500">Raw</span>
+            </div>
+            <div class="glass-card p-6 text-center">
+                <h3 class="text-gray-400 text-sm font-semibold tracking-wider">CH2O</h3>
+                <p class="text-4xl font-bold mt-2 text-pink-300" id="val-ch2o">0</p>
+                <span class="text-xs text-gray-500">mg/m³</span>
+            </div>
+        </div>
+
+        <div id="forecast-section" class="hidden mb-12">
+            <h2 class="text-2xl font-bold mb-6 text-center border-b border-gray-700 pb-4">7-Day AI Prediction (Ravangla)</h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4" id="forecast-grid">
+            </div>
+        </div>
+
+        <div id="visualizations" class="hidden mt-12">
+            <h2 class="text-2xl font-bold mb-6 text-center border-b border-gray-700 pb-4">Data Visualizations</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+                <div class="glass-card p-4">
+                    <canvas id="aqiLineChart"></canvas>
+                </div>
+                <div class="glass-card p-4">
+                    <canvas id="aqiBarChart"></canvas>
+                </div>
+            </div>
+            
+            <h2 class="text-2xl font-bold mb-6 text-center border-b border-gray-700 pb-4">Northeast India Historical AQI Map</h2>
+            <div class="glass-card p-4 h-[600px] w-full">
+                <iframe src="/map" class="w-full h-full rounded-lg border-0 bg-white"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chartsRendered = false;
+
+        async function fetchLiveData() {
+            try {
+                const response = await fetch('/api/status');
+                const state = await response.json();
+
+                document.getElementById('val-pm1').innerText = state.current_raw['PM_1.0'];
+                document.getElementById('val-pm25').innerText = state.current_raw['PM_2.5'];
+                document.getElementById('val-pm10').innerText = state.current_raw['PM_10'];
+                document.getElementById('val-co2').innerText = state.current_raw['CO2'];
+                document.getElementById('val-tvoc').innerText = state.current_raw['TVOC'];
+                document.getElementById('val-ch2o').innerText = state.current_raw['CH2O'];
+
+                if (!state.is_calibrated) {
+                    let percent = (state.count / 22) * 100;
+                    document.getElementById('progress-bar').style.width = `${percent}%`;
+                    document.getElementById('progress-text').innerText = `Reading ${state.count} / 22`;
+                } else {
+                    document.getElementById('calibration-box').innerHTML = `
+                        <h2 class="text-2xl font-bold text-emerald-400">✅ Sensor Calibrated & Averaged</h2>
+                        <p class="text-gray-400 mt-1">Live data feed active.</p>
+                    `;
+                    
+                    if (state.weekly_forecast && document.getElementById('forecast-section').classList.contains('hidden')) {
+                        document.getElementById('forecast-section').classList.remove('hidden');
+                        
+                        let forecastHTML = '';
+                        state.weekly_forecast.forEach(day => {
+                            let color = day.aqi > 100 ? 'text-red-400' : (day.aqi > 50 ? 'text-yellow-400' : 'text-emerald-400');
+                            forecastHTML += `
+                                <div class="glass-card p-4 text-center aqi-card">
+                                    <p class="text-sm text-gray-400 mb-2">${day.date}</p>
+                                    <h3 class="text-3xl font-bold ${color}">${day.aqi}</h3>
+                                    <p class="text-xs text-gray-500 mt-1">AQI</p>
+                                    <p class="text-xs text-blue-300 mt-3">${day.temp}°C Max</p>
+                                </div>
+                            `;
+                        });
+                        document.getElementById('forecast-grid').innerHTML = forecastHTML;
+
+                        if (!chartsRendered) {
+                            document.getElementById('visualizations').classList.remove('hidden');
+                            
+                            const labels = state.weekly_forecast.map(d => d.date);
+                            const aqiData = state.weekly_forecast.map(d => d.aqi);
+                            const tempData = state.weekly_forecast.map(d => d.temp);
+
+                            const ctxLine = document.getElementById('aqiLineChart').getContext('2d');
+                            new Chart(ctxLine, {
+                                type: 'line',
+                                data: {
+                                    labels: labels,
+                                    datasets: [{
+                                        label: 'AQI Forecast Curve',
+                                        data: aqiData,
+                                        borderColor: '#34d399',
+                                        backgroundColor: 'rgba(52, 211, 153, 0.2)',
+                                        tension: 0.4,
+                                        fill: true
+                                    }, {
+                                        label: 'Temperature (°C)',
+                                        data: tempData,
+                                        borderColor: '#60a5fa',
+                                        backgroundColor: 'transparent',
+                                        tension: 0.4,
+                                        fill: false
+                                    }]
+                                },
+                                options: { 
+                                    responsive: true, 
+                                    plugins: { legend: { labels: { color: 'white' } } }, 
+                                    scales: { 
+                                        x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } }, 
+                                        y: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } } 
+                                    } 
+                                }
+                            });
+
+                            const ctxBar = document.getElementById('aqiBarChart').getContext('2d');
+                            new Chart(ctxBar, {
+                                type: 'bar',
+                                data: {
+                                    labels: labels,
+                                    datasets: [{
+                                        label: 'AQI Level Histogram',
+                                        data: aqiData,
+                                        backgroundColor: aqiData.map(val => val > 100 ? '#f87171' : (val > 50 ? '#fbbf24' : '#34d399')),
+                                        borderRadius: 6
+                                    }]
+                                },
+                                options: { 
+                                    responsive: true, 
+                                    plugins: { legend: { labels: { color: 'white' } } }, 
+                                    scales: { 
+                                        x: { ticks: { color: 'white' }, grid: { display: false } }, 
+                                        y: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } } 
+                                    } 
+                                }
+                            });
+
+                            chartsRendered = true;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Error fetching data:", error);
+            }
+        }
+
+        setInterval(fetchLiveData, 2000);
+    </script>
+</body>
+</html>
