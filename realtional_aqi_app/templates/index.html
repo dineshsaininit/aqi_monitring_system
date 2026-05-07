@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Relational AQI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+            -webkit-tap-highlight-color: transparent;
+            padding-bottom: 40px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 0px;
+            height: 0px;
+            background: transparent;
+        }
+
+        .glass-panel {
+            background: rgba(24, 24, 27, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 28px;
+        }
+
+        .app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 50;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 16px 20px;
+            padding-top: calc(env(safe-area-inset-top) + 16px);
+        }
+
+        .main-content {
+            padding-top: calc(env(safe-area-inset-top) + 90px);
+            padding-left: 16px;
+            padding-right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .chart-container {
+            width: 100%;
+            height: 220px;
+            min-height: 220px;
+            display: block;
+        }
+
+        #map,
+        #historicalMap {
+            border-radius: 20px;
+            z-index: 10;
+        }
+
+        #map {
+            height: 200px;
+        }
+
+        #historicalMap {
+            height: 280px;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .chips-container {
+            display: flex;
+            overflow-x: auto;
+            gap: 8px;
+            padding-bottom: 4px;
+            scroll-snap-type: x mandatory;
+        }
+
+        .chip {
+            flex: 0 0 auto;
+            scroll-snap-align: start;
+            padding: 8px 18px;
+            border-radius: 99px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 13px;
+            font-weight: 600;
+            color: #a1a1aa;
+            transition: all 0.2s ease;
+        }
+
+        .chip.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: #3b82f6;
+            color: #60a5fa;
+        }
+
+        .fade-in-up {
+            animation: fadeInUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Bottom Sheet Animation */
+        .sheet-overlay {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .sheet-overlay.active {
+            opacity: 1;
+        }
+
+        .sheet-content {
+            transform: translateY(100%);
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .sheet-content.active {
+            transform: translateY(0);
+        }
+
+        .disease-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            border-radius: 99px;
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .advisory-card {
+            border-radius: 20px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+
+<body>
+
+    <header class="app-header flex items-center justify-between">
+        <div class="flex-1 mr-3 relative">
+            <i data-lucide="map-pin" class="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500 w-4 h-4"></i>
+            <select id="cityInput" onchange="fetchData()"
+                class="w-full bg-white/10 text-white text-[15px] font-bold rounded-2xl pl-10 pr-4 py-3.5 appearance-none outline-none focus:bg-white/15 transition-colors">
+            </select>
+        </div>
+        <button onclick="fetchData()"
+            class="w-[52px] h-[52px] flex-shrink-0 bg-blue-600 rounded-2xl flex items-center justify-center text-white active:scale-90 transition-transform shadow-[0_0_15px_rgba(37,99,235,0.4)]">
+            <i data-lucide="refresh-cw" class="w-5 h-5" id="refreshIcon"></i>
+            <div id="loader" class="spinner"></div>
+        </button>
+    </header>
+
+    <main class="main-content">
+        <!-- Hero Section -->
+        <div class="fade-in-up flex flex-col items-center mt-2" style="animation-delay: 0.1s;">
+            <h1 class="text-3xl font-black text-white text-center" id="locName">Location</h1>
+            <p class="text-zinc-500 text-sm font-semibold mt-0.5 mb-6" id="locCountry">--</p>
+
+            <div class="grid grid-cols-2 gap-3 w-full">
+                <div class="glass-panel p-6 text-center relative overflow-hidden flex flex-col justify-center">
+                    <div class="absolute -right-4 -top-4 w-20 h-20 bg-blue-500/20 rounded-full blur-2xl"></div>
+                    <p class="text-zinc-400 text-[10px] uppercase tracking-widest font-bold mb-1">Current AQI</p>
+                    <p class="text-5xl font-black text-white tracking-tight" id="todayAqi">--</p>
+                </div>
+                <div class="glass-panel p-6 text-center relative overflow-hidden flex flex-col justify-center">
+                    <div class="absolute -left-4 -top-4 w-20 h-20 bg-orange-500/20 rounded-full blur-2xl"></div>
+                    <p class="text-zinc-400 text-[10px] uppercase tracking-widest font-bold mb-1">Temperature</p>
+                    <p class="text-5xl font-black text-white tracking-tight" id="todayTemp">--°</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Emergency Action -->
+        <div class="fade-in-up" style="animation-delay: 0.15s;">
+            <button onclick="findNearestHospital()"
+                class="w-full bg-gradient-to-r from-rose-600 to-red-500 rounded-[24px] py-4 px-6 flex items-center justify-center gap-3 font-bold text-[15px] shadow-[0_8px_20px_rgba(225,29,72,0.25)] active:scale-[0.97] transition-transform">
+                <i data-lucide="stethoscope" class="w-5 h-5"></i>
+                Emergency Hospital Contact
+            </button>
+        </div>
+
+        <!-- Health Impact Section -->
+        <div id="healthSection" class="fade-in-up flex-col gap-3" style="display: none; animation-delay: 0.2s;">
+            <div id="aqiBanner" class="rounded-[24px] p-6 flex items-center justify-between">
+                <div>
+                    <p class="text-[10px] uppercase font-black opacity-70 tracking-widest mb-1" id="bannerLabel">--</p>
+                    <p class="text-3xl font-black" id="bannerAqi">--</p>
+                </div>
+                <span id="bannerEmoji" class="text-5xl drop-shadow-lg">🌫</span>
+            </div>
+
+            <!-- Personalized Health Checker -->
+            <div class="glass-panel p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                            <i data-lucide="sparkles" class="w-4 h-4 text-indigo-400"></i>
+                        </div>
+                        <h2 class="text-base font-bold">AI Health Advisor</h2>
+                    </div>
+                </div>
+
+                <div class="chips-container mb-4" id="conditionPills">
+                    <button onclick="toggleCondition('asthma'); fetchAIAdvice('Asthma')" data-cond="asthma"
+                        class="chip">Asthma</button>
+                    <button onclick="toggleCondition('copd'); fetchAIAdvice('COPD')" data-cond="copd"
+                        class="chip">COPD</button>
+                    <button onclick="toggleCondition('heart'); fetchAIAdvice('Heart Disease')" data-cond="heart"
+                        class="chip">Heart</button>
+                    <button onclick="toggleCondition('diabetes'); fetchAIAdvice('Diabetes')" data-cond="diabetes"
+                        class="chip">Diabetes</button>
+                    <button onclick="toggleCondition('elderly'); fetchAIAdvice('Elderly (65+)')" data-cond="elderly"
+                        class="chip">Elderly</button>
+                    <button onclick="toggleCondition('children'); fetchAIAdvice('Children (<12)')" data-cond="children"
+                        class="chip">Children</button>
+                    <button onclick="toggleCondition('pregnant'); fetchAIAdvice('Pregnant')" data-cond="pregnant"
+                        class="chip">Pregnant</button>
+                </div>
+
+                <div id="advisoryOutput" class="text-sm text-zinc-400">
+                    <div class="bg-white/5 rounded-2xl p-4 text-center border border-white/5">Select a condition above
+                        for personalized advice.</div>
+                </div>
+            </div>
+
+            <div class="glass-panel p-5">
+                <h3 class="font-bold text-white mb-3 text-xs uppercase tracking-widest text-zinc-400">Associated Risks
+                </h3>
+                <div id="diseaseList" class="flex flex-wrap gap-2 mb-5"></div>
+                <h3 class="font-bold text-white mb-3 text-xs uppercase tracking-widest text-zinc-400">Preventions</h3>
+                <ul id="preventionList" class="space-y-3 text-sm text-zinc-300"></ul>
+            </div>
+        </div>
+
+        <!-- 7 Day numerical forecast -->
+        <div class="fade-in-up glass-panel p-5" style="animation-delay: 0.25s;">
+            <h3 class="font-bold text-white mb-4 flex items-center gap-2"><i data-lucide="calendar-days"
+                    class="w-4 h-4 text-blue-400"></i> 7-Day Forecast</h3>
+            <div id="numericalForecast" class="space-y-2"></div>
+        </div>
+
+        <!-- Local Map -->
+        <div class="fade-in-up glass-panel p-2" style="animation-delay: 0.3s;">
+            <div id="map"></div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="fade-in-up space-y-3 mt-2" style="animation-delay: 0.35s;">
+            <h2 class="text-lg font-black px-1 mb-2">Analytics</h2>
+            <div class="glass-panel p-2 pb-0">
+                <div id="aqiChart" class="chart-container"></div>
+            </div>
+            <div class="glass-panel p-2 pb-0">
+                <div id="barChart" class="chart-container"></div>
+            </div>
+            <div class="glass-panel p-2 pb-0">
+                <div id="relationChart" class="chart-container"></div>
+            </div>
+            <div class="glass-panel p-2 pb-0">
+                <div id="histChart" class="chart-container"></div>
+            </div>
+        </div>
+
+        <!-- Regional Map -->
+        <div class="fade-in-up glass-panel p-2 mt-2" style="animation-delay: 0.4s;">
+            <div class="px-3 py-3 flex justify-between items-center">
+                <h3 class="font-bold text-white text-sm">Regional Overview</h3>
+                <i data-lucide="globe" class="w-4 h-4 text-zinc-400"></i>
+            </div>
+            <div id="historicalMap"></div>
+        </div>
+
+        <!-- Team Footer -->
+        <div class="fade-in-up text-center mt-10 mb-6" style="animation-delay: 0.5s;">
+            <p class="text-zinc-600 text-[10px] font-black uppercase tracking-[0.2em]">Relational AQI</p>
+            <p class="text-zinc-700 text-[9px] mt-1 uppercase font-bold">DBMS PROJECT | PKK SIR</p>
+        </div>
+    </main>
+
+    <!-- Bottom Sheet Modal for AI -->
+    <div id="aiModal" class="fixed inset-0 z-[100] hidden">
+        <div id="aiOverlay" class="absolute inset-0 bg-black/60 backdrop-blur-sm sheet-overlay"
+            onclick="closeAIModal()"></div>
+        <div id="aiModalContent"
+            class="absolute bottom-0 left-0 right-0 bg-[#121214] rounded-t-[32px] p-6 border-t border-white/10 max-h-[85vh] flex flex-col sheet-content shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+            <div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6"></div>
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-black flex items-center gap-2"><i data-lucide="sparkles"
+                        class="text-indigo-400 fill-indigo-400/20"></i> AI Advisor</h3>
+                <button onclick="closeAIModal()"
+                    class="bg-white/10 rounded-full p-2 active:scale-90 transition-transform"><i data-lucide="x"
+                        class="w-5 h-5"></i></button>
+            </div>
+            <div class="overflow-y-auto pb-8 custom-scrollbar">
+                <div id="aiLoading" class="flex flex-col items-center justify-center py-12 hidden">
+                    <div class="spinner border-blue-500 w-10 h-10 border-4 mb-4" style="display:block;"></div>
+                    <p class="text-zinc-400 font-medium animate-pulse text-sm">Analyzing health impacts...</p>
+                </div>
+                <div id="aiResponse" class="hidden text-zinc-300 text-[15px] leading-relaxed space-y-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet Modal for Hospital -->
+    <div id="hospitalModal" class="fixed inset-0 z-[100] hidden">
+        <div id="hospitalOverlay" class="absolute inset-0 bg-black/60 backdrop-blur-sm sheet-overlay"
+            onclick="closeHospitalModal()"></div>
+        <div id="hospitalModalContent"
+            class="absolute bottom-0 left-0 right-0 bg-[#121214] rounded-t-[32px] p-6 border-t border-white/10 max-h-[85vh] flex flex-col sheet-content shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+            <div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6"></div>
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-black flex items-center gap-2"><i data-lucide="hospital"
+                        class="text-rose-400 fill-rose-400/20"></i> Nearest Hospital</h3>
+                <button onclick="closeHospitalModal()"
+                    class="bg-white/10 rounded-full p-2 active:scale-90 transition-transform"><i data-lucide="x"
+                        class="w-5 h-5"></i></button>
+            </div>
+            <div class="overflow-y-auto pb-8">
+                <div id="hospitalLoading" class="flex flex-col items-center justify-center py-12 hidden">
+                    <div class="spinner border-rose-500 w-10 h-10 border-4 mb-4" style="display:block;"></div>
+                    <p class="text-zinc-400 font-medium text-sm">Locating medical facilities...</p>
+                </div>
+                <div id="hospitalResult" class="hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        /* Data Constants */
+        const NE_DISTRICTS = {
+            "Arunachal Pradesh": ["Anjaw", "Bichom", "Changlang", "Dibang Valley", "East Kameng", "East Siang", "Itanagar Capital Complex", "Kamle", "Keyi Panyor", "Kra Daadi", "Kurung Kumey", "Lepa Rada", "Lohit", "Longding", "Lower Dibang Valley", "Lower Siang", "Lower Subansiri", "Namsai", "Pakke-Kessang", "Papum Pare", "Shi Yomi", "Siang", "Tawang", "Tirap", "Upper Siang", "Upper Subansiri", "West Kameng", "West Siang"],
+            "Assam": ["Bajali", "Baksa", "Barpeta", "Biswanath", "Bongaigaon", "Cachar", "Charaideo", "Chirang", "Darrang", "Dhemaji", "Dhubri", "Dibrugarh", "Dima Hasao", "Goalpara", "Golaghat", "Hailakandi", "Hojai", "Jorhat", "Kamrup", "Kamrup Metropolitan", "Karbi Anglong", "Karimganj", "Kokrajhar", "Lakhimpur", "Majuli", "Morigaon", "Nagaon", "Nalbari", "Sivasagar", "Sonitpur", "South Salmara-Mankachar", "Tamulpur", "Tinsukia", "Udalguri", "West Karbi Anglong"],
+            "Manipur": ["Bishnupur", "Chandel", "Churachandpur", "Imphal East", "Imphal West", "Jiribam", "Kakching", "Kamjong", "Kangpokpi", "Noney", "Pherzawl", "Senapati", "Tamenglong", "Tengnoupal", "Thoubal", "Ukhrul"],
+            "Meghalaya": ["East Garo Hills", "East Jaintia Hills", "East Khasi Hills", "Eastern West Khasi Hills", "North Garo Hills", "Ri Bhoi", "South Garo Hills", "South West Garo Hills", "South West Khasi Hills", "West Garo Hills", "West Jaintia Hills", "West Khasi Hills"],
+            "Mizoram": ["Aizawl", "Champhai", "Hnahthial", "Khawzawl", "Kolasib", "Lawngtlai", "Lunglei", "Mamit", "Siaha", "Saitual", "Serchhip"],
+            "Nagaland": ["Chümoukedima", "Dimapur", "Kiphire", "Kohima", "Longleng", "Mokokchung", "Mon", "Niuland", "Noklak", "Peren", "Phek", "Shamator", "Tseminyü", "Tuensang", "Wokha", "Zünheboto"],
+            "Sikkim": ["Gangtok", "Gyalshing", "Mangan", "Namchi", "Pakyong", "Soreng"],
+            "Tripura": ["Dhalai", "Gomati", "Khowai", "North Tripura", "Sepahijala", "South Tripura", "Unakoti", "West Tripura"],
+            "Rajasthan": ["Churu", "Bharatpur"]
+        };
+
+        const AQI_HEALTH_DATA = [
+            { min: 0, max: 50, category: 'Good', emoji: '😊', bg: 'linear-gradient(135deg,#064e3b,#065f46)', textColor: '#6ee7b7', diseases: ['Minimal risk'], preventions: ['Enjoy outdoor activities freely.'] },
+            { min: 51, max: 100, category: 'Satisfactory', emoji: '🙂', bg: 'linear-gradient(135deg,#14532d,#166534)', textColor: '#86efac', diseases: ['Minor breathing issues'], preventions: ['Sensitive individuals may limit prolonged outdoor activity.'] },
+            { min: 101, max: 200, category: 'Moderate', emoji: '😐', bg: 'linear-gradient(135deg,#78350f,#92400e)', textColor: '#fcd34d', diseases: ['Asthma flare-ups', 'Eye irritation'], preventions: ['Wear an N95 mask outdoors.', 'Limit strenuous exercise.'] },
+            { min: 201, max: 300, category: 'Poor', emoji: '😷', bg: 'linear-gradient(135deg,#7f1d1d,#991b1b)', textColor: '#fca5a5', diseases: ['Severe Asthma exacerbations', 'Increased risk of heart attacks'], preventions: ['Avoid all outdoor activities.', 'Always wear N95 mask if going outside.'] },
+            { min: 301, max: 400, category: 'Very Poor', emoji: '🤢', bg: 'linear-gradient(135deg,#581c87,#6b21a8)', textColor: '#d8b4fe', diseases: ['Life-threatening respiratory distress'], preventions: ['DO NOT go outside under any circumstances.', 'Run air purifiers.'] },
+            { min: 401, max: 9999, category: 'Hazardous', emoji: '☠️', bg: 'linear-gradient(135deg,#1c0a00,#450a0a)', textColor: '#fecaca', diseases: ['Immediate respiratory failure risk'], preventions: ['🚨 Evacuate the area if possible.', 'Anyone outdoors is at immediate health risk.'] }
+        ];
+
+        const CONDITION_TIPS = {
+            asthma: [
+                { maxAqi: 50, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Air quality is great.', 'Carry your inhaler just in case.'] },
+                { maxAqi: 100, risk: 'low', badge: 'Low Risk', color: '#84cc16', bg: 'rgba(132,204,22,.1)', tips: ['Generally safe.', 'Keep inhaler accessible.'] },
+                { maxAqi: 200, risk: 'medium', badge: 'Moderate Risk', color: '#f59e0b', bg: 'rgba(245,158,11,.1)', tips: ['Use preventer inhaler.', 'Wear an N95 mask outdoors.'] },
+                { maxAqi: 9999, risk: 'high', badge: 'High Risk', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['Stay indoors.', 'Run air purifier.', 'Keep rescue inhaler ready.'] }
+            ],
+            copd: [{ maxAqi: 50, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Good for a walk.'] }, { maxAqi: 200, risk: 'medium', badge: 'Moderate', color: '#f59e0b', bg: 'rgba(245,158,11,.1)', tips: ['Reduce outdoor time.'] }, { maxAqi: 9999, risk: 'high', badge: 'Danger', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['Strictly indoors.'] }],
+            heart: [{ maxAqi: 50, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Normal activities.'] }, { maxAqi: 200, risk: 'medium', badge: 'Moderate', color: '#f59e0b', bg: 'rgba(245,158,11,.1)', tips: ['Avoid peak traffic.', 'Take meds.'] }, { maxAqi: 9999, risk: 'high', badge: 'Danger', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['Stay indoors.', 'Rest.'] }],
+            diabetes: [{ maxAqi: 100, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Monitor glucose.'] }, { maxAqi: 9999, risk: 'high', badge: 'High Risk', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['Stay indoors.', 'Check sugar frequently.'] }],
+            elderly: [{ maxAqi: 100, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Gentle walks.'] }, { maxAqi: 9999, risk: 'high', badge: 'High Risk', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['Stay strictly indoors.', 'Use masks if needed.'] }],
+            children: [{ maxAqi: 100, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Play outside.'] }, { maxAqi: 200, risk: 'medium', badge: 'Moderate', color: '#f59e0b', bg: 'rgba(245,158,11,.1)', tips: ['Limit play to 20m.'] }, { maxAqi: 9999, risk: 'high', badge: 'Danger', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['No outdoor play.'] }],
+            pregnant: [{ maxAqi: 100, risk: 'low', badge: 'Safe', color: '#10b981', bg: 'rgba(16,185,129,.1)', tips: ['Light walks.'] }, { maxAqi: 9999, risk: 'high', badge: 'High Risk', color: '#ef4444', bg: 'rgba(239,68,68,.1)', tips: ['Stay indoors.', 'Avoid cooking fumes.'] }]
+        };
+
+        const historicalData = [
+            [23.9153, 91.3879, 'West Tripura', 160, 'Moderate', '#f59e0b'],
+            [26.1469, 91.2227, 'Kamrup', 158, 'Moderate', '#f59e0b'],
+            [28.1167, 96.8199, 'Anjaw', 77, 'Satisfactory', '#84cc16'],
+            [27.329, 88.6123, 'Gangtok', 143, 'Moderate', '#f59e0b']
+        ]; // Truncated for mobile performance
+
+        function populateDropdown() {
+            const select = document.getElementById('cityInput');
+            for (const [state, cities] of Object.entries(NE_DISTRICTS)) {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = state;
+                cities.forEach(city => {
+                    const option = document.createElement('option');
+                    option.value = city; option.textContent = city;
+                    optgroup.appendChild(option);
+                });
+                select.appendChild(optgroup);
+            }
+            select.value = "Kamrup Metropolitan"; // Default
+        }
+
+        let map = L.map('map', { zoomControl: false }).setView([26.2, 92.9], 5);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+        let marker;
+
+        let histMap = L.map('historicalMap', { zoomControl: false }).setView([26.2, 92.9], 5);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(histMap);
+        historicalData.forEach(p => {
+            L.circleMarker([p[0], p[1]], { color: p[5], fillColor: p[5], fillOpacity: 0.8, radius: 5, weight: 2 }).addTo(histMap);
+        });
+
+        const CHART_HEIGHT = 220;
+
+        function getLayoutConfig(title) {
+            const w = window.innerWidth > 0 ? window.innerWidth - 32 : 320;
+            return {
+                paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#71717a', size: 10, family: 'Inter' },
+                margin: { t: 35, b: 25, l: 35, r: 12 },
+                xaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
+                yaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
+                autosize: true,
+                width: w,
+                height: CHART_HEIGHT,
+                title: { text: title, font: { color: '#fff', size: 12 } }
+            };
+        }
+
+        const CHART_IDS = ['aqiChart', 'barChart', 'relationChart', 'histChart'];
+
+        function forceResizeCharts() {
+            CHART_IDS.forEach(id => {
+                const el = document.getElementById(id);
+                if (el && el._fullLayout) {
+                    Plotly.relayout(id, { width: window.innerWidth - 32, height: CHART_HEIGHT });
+                }
+            });
+        }
+
+        window.addEventListener('resize', forceResizeCharts);
+
+        let _appInited = false;
+        function initApp() {
+            if (_appInited) return;
+            _appInited = true;
+            populateDropdown();
+            fetchData();
+        }
+
+        // Fire on DOMContentLoaded, or immediately if already past it
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+        // Final safety net for Capacitor WebView
+        window.addEventListener('load', initApp);
+
+        async function fetchData() {
+            const city = document.getElementById('cityInput').value.trim();
+            if (!city) return;
+
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('refreshIcon').style.display = 'none';
+
+            try {
+                const response = await fetch(`/api/predict?city=${encodeURIComponent(city)}`);
+                const result = await response.json();
+                if (result.error) { alert(result.error); return; }
+                updateDashboard(result);
+            } catch (error) {
+                console.error(error);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('refreshIcon').style.display = 'block';
+            }
+        }
+
+        let currentAqi = null;
+        let selectedConditions = new Set();
+
+        function updateDashboard(res) {
+            document.getElementById('locName').innerText = res.city;
+            document.getElementById('locCountry').innerText = res.country;
+
+            map.setView([res.lat, res.lon], 10);
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([res.lat, res.lon]).addTo(map);
+
+            const predictions = res.data.predictions;
+            const raw = res.data.raw_data;
+            const todayAqiVal = Math.round(predictions[0].aqi);
+
+            document.getElementById('todayAqi').innerText = todayAqiVal;
+            document.getElementById('todayTemp').innerText = raw[0].temperature;
+
+            updateHealthPanel(todayAqiVal);
+
+            const numericalContainer = document.getElementById('numericalForecast');
+            numericalContainer.innerHTML = '';
+            predictions.forEach(p => {
+                let colorClass = 'text-emerald-400';
+                if (p.aqi > 50) colorClass = 'text-yellow-400';
+                if (p.aqi > 100) colorClass = 'text-orange-400';
+                if (p.aqi > 150) colorClass = 'text-red-400';
+                if (p.aqi > 200) colorClass = 'text-purple-400';
+
+                numericalContainer.innerHTML += `
+                    <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
+                        <span class="text-zinc-300 text-sm font-semibold">${p.date}</span>
+                        <span class="${colorClass} font-black">AQI: ${Math.round(p.aqi)}</span>
+                    </div>`;
+            });
+
+            const dates = predictions.map(p => p.date.substring(5)); // Short dates
+            const aqis = predictions.map(p => p.aqi);
+            const temps = raw.map(r => r.temperature);
+            const pm25 = raw.map(r => r.PM2_5);
+
+            const plotConfig = { displayModeBar: false, responsive: true, staticPlot: false };
+
+            Plotly.newPlot('aqiChart', [{
+                x: dates, y: aqis, type: 'scatter', mode: 'lines+markers',
+                line: { shape: 'spline', color: '#3b82f6', width: 3 },
+                marker: { size: 6, color: '#60a5fa' },
+                fill: 'tozeroy', fillcolor: 'rgba(59, 130, 246, 0.15)'
+            }], getLayoutConfig('AQI Trend'), plotConfig);
+
+            Plotly.newPlot('relationChart', [{
+                x: temps, y: pm25, mode: 'markers', type: 'scatter',
+                marker: { size: 8, color: aqis, colorscale: 'Viridis', showscale: false }
+            }], getLayoutConfig('Temp vs PM2.5'), plotConfig);
+
+            Plotly.newPlot('histChart', [{
+                x: raw.map(r => r.wind_speed_num), type: 'histogram',
+                marker: { color: '#10b981' }, opacity: 0.8
+            }], getLayoutConfig('Wind Distribution'), plotConfig);
+
+            Plotly.newPlot('barChart', [
+                { x: dates, y: pm25, name: 'PM2.5', type: 'bar', marker: { color: '#f59e0b' } },
+                { x: dates, y: raw.map(r => r.PM10), name: 'PM10', type: 'bar', marker: { color: '#ef4444' } }
+            ], { ...getLayoutConfig('Pollutants'), barmode: 'group', showlegend: false }, plotConfig);
+
+            // Force resize after paint — critical for mobile WebViews
+            setTimeout(forceResizeCharts, 300);
+            setTimeout(forceResizeCharts, 1000);
+        }
+
+        function getAqiBucket(aqi) { return AQI_HEALTH_DATA.find(b => aqi >= b.min && aqi <= b.max) || AQI_HEALTH_DATA[0]; }
+        function getConditionAqiEntry(condKey, aqi) { return CONDITION_TIPS[condKey].find(e => aqi <= e.maxAqi) || CONDITION_TIPS[condKey][CONDITION_TIPS[condKey].length - 1]; }
+
+        function updateHealthPanel(aqi) {
+            currentAqi = aqi;
+            const bucket = getAqiBucket(aqi);
+            const section = document.getElementById('healthSection');
+            section.style.display = 'flex';
+
+            const banner = document.getElementById('aqiBanner');
+            banner.style.background = bucket.bg;
+            banner.style.color = bucket.textColor;
+            document.getElementById('bannerLabel').textContent = bucket.category;
+            document.getElementById('bannerAqi').textContent = aqi;
+            document.getElementById('bannerEmoji').textContent = bucket.emoji;
+
+            document.getElementById('diseaseList').innerHTML = bucket.diseases.map(d => `<span class="disease-tag">${d}</span>`).join('');
+            document.getElementById('preventionList').innerHTML = bucket.preventions.map(p => `<li class="flex items-start gap-2"><span class="text-emerald-500 mt-0.5">•</span><span>${p}</span></li>`).join('');
+
+            renderPersonalizedAdvisory();
+        }
+
+        function toggleCondition(cond) {
+            const btn = document.querySelector(`[data-cond="${cond}"]`);
+            if (selectedConditions.has(cond)) {
+                selectedConditions.delete(cond); btn.classList.remove('active');
+            } else {
+                selectedConditions.add(cond); btn.classList.add('active');
+            }
+            renderPersonalizedAdvisory();
+        }
+
+        function renderPersonalizedAdvisory() {
+            const out = document.getElementById('advisoryOutput');
+            if (selectedConditions.size === 0 || currentAqi === null) {
+                out.innerHTML = '<div class="bg-white/5 rounded-2xl p-4 text-center border border-white/5">Select a condition above for personalized advice.</div>';
+                return;
+            }
+            let html = '';
+            const condNames = { asthma: 'Asthma', copd: 'COPD', heart: 'Heart', diabetes: 'Diabetes', elderly: 'Elderly', children: 'Children', pregnant: 'Pregnant' };
+
+            selectedConditions.forEach(cond => {
+                const entry = getConditionAqiEntry(cond, currentAqi);
+                html += `
+                    <div class="advisory-card">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-bold text-white text-sm">${condNames[cond]}</span>
+                            <span class="text-[10px] uppercase font-black px-2 py-1 rounded-md tracking-wider" style="background:${entry.color}22; color:${entry.color};">${entry.badge}</span>
+                        </div>
+                        <ul class="space-y-1 mt-2">
+                            ${entry.tips.map(t => `<li class="text-xs text-zinc-300 flex gap-1.5"><span style="color:${entry.color}">•</span><span>${t}</span></li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            });
+            out.innerHTML = html;
+        }
+
+        /* Bottom Sheet Modal Logic */
+        function openSheet(id) {
+            const modal = document.getElementById(id);
+            const overlay = modal.querySelector('.sheet-overlay');
+            const content = modal.querySelector('.sheet-content');
+
+            modal.classList.remove('hidden');
+            // trigger reflow
+            void modal.offsetWidth;
+            overlay.classList.add('active');
+            content.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeSheet(id) {
+            const modal = document.getElementById(id);
+            const overlay = modal.querySelector('.sheet-overlay');
+            const content = modal.querySelector('.sheet-content');
+
+            overlay.classList.remove('active');
+            content.classList.remove('active');
+            document.body.style.overflow = '';
+
+            setTimeout(() => modal.classList.add('hidden'), 400);
+        }
+
+        async function fetchAIAdvice(disease) {
+            if (!currentAqi) return;
+
+            openSheet('aiModal');
+            const loading = document.getElementById('aiLoading');
+            const resp = document.getElementById('aiResponse');
+
+            loading.classList.remove('hidden');
+            resp.classList.add('hidden');
+            resp.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/ai_advice', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ disease: disease, aqi: currentAqi })
+                });
+                const result = await response.json();
+
+                loading.classList.add('hidden');
+                resp.classList.remove('hidden');
+
+                if (result.error) {
+                    resp.innerHTML = `<div class="bg-red-500/10 text-red-400 p-4 rounded-xl border border-red-500/20 font-semibold">${result.error}</div>`;
+                } else {
+                    const fmt = result.advice
+                        .replace(/\*\*(.*?)\*\*/g, '<span class="text-white font-bold">$1</span>')
+                        .replace(/\*(.*?)\*/g, '<span class="text-white italic">$1</span>')
+                        .replace(/\n\n/g, '</p><p class="mt-3">')
+                        .replace(/\n/g, '<br/>')
+                        .replace(/•/g, '<span class="text-indigo-400 mr-2">•</span>');
+                    resp.innerHTML = `<p>${fmt}</p>`;
+                }
+            } catch (e) {
+                loading.classList.add('hidden'); resp.classList.remove('hidden');
+                resp.innerHTML = `<div class="bg-red-500/10 text-red-400 p-4 rounded-xl border border-red-500/20 font-semibold">Connection failed.</div>`;
+            }
+        }
+        function closeAIModal() { closeSheet('aiModal'); }
+
+        function findNearestHospital() {
+            if (!navigator.geolocation) { alert("Geolocation not supported"); return; }
+
+            openSheet('hospitalModal');
+            const loading = document.getElementById('hospitalLoading');
+            const resultDiv = document.getElementById('hospitalResult');
+
+            loading.classList.remove('hidden');
+            resultDiv.classList.add('hidden');
+
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const lat = pos.coords.latitude, lon = pos.coords.longitude;
+                try {
+                    const q = `[out:json];(nwr["amenity"="hospital"](around:20000, ${lat}, ${lon}););out center;`;
+                    const res = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+                    const data = await res.json();
+
+                    loading.classList.add('hidden');
+                    resultDiv.classList.remove('hidden');
+
+                    if (!data.elements.length) {
+                        resultDiv.innerHTML = `<div class="bg-amber-500/10 text-amber-400 p-4 rounded-xl text-center">No hospitals within 20km.</div>`;
+                        return;
+                    }
+
+                    const sorted = data.elements.map(h => {
+                        const hLat = h.lat || (h.center && h.center.lat);
+                        const hLon = h.lon || (h.center && h.center.lon);
+                        return { ...h, lat: hLat, lon: hLon, dist: getDist(lat, lon, hLat, hLon) };
+                    }).sort((a, b) => a.dist - b.dist);
+
+                    const n = sorted[0];
+                    const name = n.tags.name || "Unnamed Hospital";
+                    const address = n.tags["addr:full"] || "Address unavailable";
+
+                    resultDiv.innerHTML = `
+                        <div id="autoCallSection" class="bg-rose-500/10 p-4 rounded-2xl border border-rose-500/20 mb-4 text-center">
+                            <p class="text-white font-bold mb-2">Calling emergency (112) in <span id="autoCallTime" class="text-rose-400 text-2xl mx-1">10</span>s</p>
+                            <button onclick="cancelAutoCall()" class="px-6 py-2 bg-zinc-800 active:bg-zinc-700 border border-white/10 text-white rounded-xl text-sm font-bold transition-colors">
+                                Cancel Call
+                            </button>
+                        </div>
+                        <div class="bg-white/5 p-5 rounded-2xl border border-white/5 mb-4 text-center">
+                            <h4 class="text-xl font-bold text-white mb-2">${name}</h4>
+                            <p class="text-rose-400 font-bold mb-4">${n.dist.toFixed(2)} km away</p>
+                            <p class="text-zinc-400 text-sm mb-4">${address}</p>
+                            <button onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${n.lat},${n.lon}', '_blank')" class="w-full bg-rose-600 active:bg-rose-700 text-white py-3 rounded-xl font-bold transition-colors">
+                                Get Directions
+                            </button>
+                        </div>
+                    `;
+                    startAutoCall();
+                } catch (e) {
+                    loading.classList.add('hidden'); resultDiv.classList.remove('hidden');
+                    resultDiv.innerHTML = `<div class="bg-red-500/10 text-red-400 p-4 rounded-xl text-center">Failed to fetch data.</div>`;
+                }
+            }, () => {
+                loading.classList.add('hidden'); resultDiv.classList.remove('hidden');
+                resultDiv.innerHTML = `<div class="bg-red-500/10 text-red-400 p-4 rounded-xl text-center">Location access denied.</div>`;
+            });
+        }
+
+        let autoCallInterval = null;
+        function cancelAutoCall() {
+            if (autoCallInterval) clearInterval(autoCallInterval);
+            autoCallInterval = null;
+            const acSec = document.getElementById('autoCallSection');
+            if (acSec) acSec.style.display = 'none';
+        }
+        function startAutoCall() {
+            let timeLeft = 10;
+            autoCallInterval = setInterval(() => {
+                timeLeft--;
+                const timeSpan = document.getElementById('autoCallTime');
+                if (timeSpan) timeSpan.innerText = timeLeft;
+                if (timeLeft <= 0) {
+                    cancelAutoCall();
+                    if (window.Capacitor && window.Capacitor.Plugins.AutoCaller) {
+                        window.Capacitor.Plugins.AutoCaller.callNumber({ number: '112' }).catch(e => {
+                            console.error("AutoCaller failed:", e);
+                            window.location.href = 'tel:112';
+                        });
+                    } else {
+                        window.location.href = 'tel:112';
+                    }
+                }
+            }, 1000);
+        }
+
+        function closeHospitalModal() {
+            cancelAutoCall();
+            closeSheet('hospitalModal');
+        }
+
+        function getDist(lat1, lon1, lat2, lon2) {
+            const p = Math.PI / 180, c = Math.cos;
+            const a = 0.5 - c((lat2 - lat1) * p) / 2 + c(lat1 * p) * c(lat2 * p) * (1 - c((lon2 - lon1) * p)) / 2;
+            return 12742 * Math.asin(Math.sqrt(a));
+        }
+    </script>
+</body>
+
+</html>
