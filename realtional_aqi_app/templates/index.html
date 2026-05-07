@@ -780,16 +780,30 @@
                 if (timeSpan) timeSpan.innerText = timeLeft;
                 if (timeLeft <= 0) {
                     cancelAutoCall();
-                    if (window.Capacitor && window.Capacitor.Plugins.AutoCaller) {
+                    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AutoCaller) {
                         window.Capacitor.Plugins.AutoCaller.callNumber({ number: '112' }).catch(e => {
                             console.error("AutoCaller failed:", e);
-                            window.location.href = 'tel:112';
+                            _dialEmergency();
                         });
                     } else {
-                        window.location.href = 'tel:112';
+                        _dialEmergency();
                     }
                 }
             }, 1000);
+        }
+
+        function _dialEmergency() {
+            const isAndroid = /android/i.test(navigator.userAgent);
+            if (isAndroid) {
+                const a = document.createElement('a');
+                a.href = 'intent://dial/112#Intent;scheme=tel;action=android.intent.action.DIAL;end';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => document.body.removeChild(a), 500);
+            } else {
+                window.open('tel:112', '_system');
+            }
         }
 
         function closeHospitalModal() {
